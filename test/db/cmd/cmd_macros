@@ -266,3 +266,18 @@ EXPECT=<<EOF
 5
 EOF
 RUN
+
+NAME=macros survive project save/load
+FILE=bins/elf/crackme0x05
+CMDS=<<EOF
+(macro ; echo macro-restored)
+Ps .tmp_project_macros.rzdb
+o--
+Po .tmp_project_macros.rzdb
+.(macro)
+rm .tmp_project_macros.rzdb
+EOF
+EXPECT=<<EOF
+macro-restored
+EOF
+RUN

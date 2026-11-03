@@ -1,6 +1,5 @@
 // SPDX-FileCopyrightText: 2020 Florian Märkl <info@florianmaerkl.de>
 // SPDX-License-Identifier: LGPL-3.0-only
-
 #include <rz_util/rz_serialize.h>
 #include <rz_core.h>
 
@@ -76,6 +75,7 @@ RZ_API void rz_serialize_core_save(RZ_NONNULL Sdb *db, RZ_NONNULL RzCore *core, 
 	rz_serialize_analysis_save(sdb_ns(db, "analysis", true), core->analysis);
 	rz_serialize_debug_save(sdb_ns(db, "debug", true), core->dbg);
 	rz_serialize_core_seek_save(sdb_ns(db, "seek", true), core);
+	rz_serialize_core_macro_save(sdb_ns(db, "macro", true), core->rcmd);
 
 	char buf[0x20];
 	if (snprintf(buf, sizeof(buf), "0x%" PFMT64x, core->offset) < 0) {
@@ -104,6 +104,10 @@ RZ_API bool rz_serialize_core_load(RZ_NONNULL Sdb *db, RZ_NONNULL RzCore *core, 
 	SUB("analysis", rz_serialize_analysis_load(subdb, core->analysis, res));
 	SUB("debug", rz_serialize_debug_load(subdb, core->dbg, res));
 	SUB("seek", rz_serialize_core_seek_load(subdb, core, res));
+	Sdb *macro_db = sdb_ns(db, "macro", false);
+	if (macro_db && !rz_serialize_core_macro_load(macro_db, core->rcmd, res)) {
+		return false;
+	}
 
 	const char *str = sdb_const_get(db, "offset");
 	if (!str || !*str) {
@@ -325,6 +329,54 @@ enum {
 };
 
 /**
+ * \brief Save a command macro to an SDB database.
+ * \param cmd The command context containing the macro.
+ * \param macro The macro that will be serialized.
+ * \param user SDB database where the serialized macro will be stored.
+ * \return True if the macro was successfully saved, false otherwise.
+ *
+ * Serializes the macro arguments and code into JSON and stores
+ * the resulting value in the database using the macro name as its key.
+ */
+
+static bool macro_save_cb(RzCmd *cmd, const RzCmdMacro *macro, void *user) {
+	(void)cmd;
+	Sdb *db = user;
+	PJ *j = pj_new();
+	if (!j) {
+		return false;
+	}
+
+	pj_o(j);
+	pj_ka(j, "args");
+	for (size_t i = 0; i < macro->nargs; i++) {
+		pj_s(j, macro->args[i]);
+	}
+	pj_end(j);
+	pj_ks(j, "code", macro->code);
+	pj_end(j);
+
+	sdb_set(db, macro->name, pj_string(j));
+	pj_free(j);
+	return true;
+}
+
+/**
+ * \brief Save all command macros from an RzCmd instance.
+ * \param db SDB database where the macros will be stored.
+ * \param cmd Command context containing the macros to save.
+ *
+ * Iterates through all registered command macros and serializes
+ * each one into the provided database.
+ */
+
+RZ_API void rz_serialize_core_macro_save(RZ_NONNULL Sdb *db, RZ_NONNULL RzCmd *cmd) {
+	rz_return_if_fail(db && cmd);
+
+	rz_cmd_macro_foreach(cmd, macro_save_cb, db);
+}
+
+/**
  * \brief Create and initialize a JSON parser for seek history items
  * \return a RzKeyParser* for seek history items
  **/
@@ -497,4 +549,93 @@ out_free_list:
 out_free_parser:
 	rz_key_parser_free(seek_parser);
 	return ret;
+}
+
+/**
+ * \brief Load a command macro from an SDB database entry.
+ * \param user RzCmd instance where the macro will be registered.
+ * \param kv Database entry containing the serialized macro.
+ * \return True if the macro was successfully loaded, false otherwise.
+ *
+ * Parses the JSON representation of a macro, extracts its arguments
+ * and code, and registers or updates it in the command context.
+ */
+
+static bool macro_load_cb(void *user, const SdbKv *kv) {
+	RzCmd *cmd = user;
+	char *json_str = sdbkv_dup_value(kv);
+	if (!json_str) {
+		return false;
+	}
+
+	RzJson *json = rz_json_parse(json_str);
+	if (!json || json->type != RZ_JSON_OBJECT) {
+		rz_json_free(json);
+		free(json_str);
+		return false;
+	}
+
+	const RzJson *args_json = rz_json_get(json, "args");
+	const RzJson *code_json = rz_json_get(json, "code");
+
+	if (!args_json || args_json->type != RZ_JSON_ARRAY || !code_json || code_json->type != RZ_JSON_STRING) {
+		rz_json_free(json);
+		free(json_str);
+		return false;
+	}
+
+	size_t nargs = args_json->children.count;
+	const char **args = calloc(nargs + 1, sizeof(char *));
+	if (!args) {
+		rz_json_free(json);
+		free(json_str);
+		return false;
+	}
+
+	size_t i = 0;
+	for (const RzJson *arg = args_json->children.first; arg; arg = arg->next) {
+		if (arg->type != RZ_JSON_STRING) {
+			free(args);
+			rz_json_free(json);
+			free(json_str);
+			return false;
+		}
+		args[i++] = arg->str_value;
+	}
+
+	const char *name = sdbkv_key(kv);
+	bool result = rz_cmd_macro_get(cmd, name)
+		? rz_cmd_macro_update(cmd, name, args, code_json->str_value)
+		: rz_cmd_macro_add(cmd, name, args, code_json->str_value);
+
+	free(args);
+	rz_json_free(json);
+	free(json_str);
+	return result;
+}
+
+/**
+ * \brief Load command macros from an SDB database.
+ * \param db SDB database containing the serialized macros.
+ * \param cmd Command context where the macros will be registered.
+ * \param res Serialization result information used to report errors.
+ * \return True if all macros were successfully loaded, false otherwise.
+ *
+ * Iterates through the database entries and restores each command
+ * macro into the provided command context.
+ */
+
+RZ_API bool rz_serialize_core_macro_load(RZ_NONNULL Sdb *db, RZ_NONNULL RzCmd *cmd, RZ_NULLABLE RzSerializeResultInfo *res) {
+	rz_return_val_if_fail(cmd, false);
+
+	if (!db) {
+		return true;
+	}
+
+	bool result = sdb_foreach(db, macro_load_cb, cmd);
+
+	if (!result) {
+		RZ_SERIALIZE_ERR(res, "failed to load macros");
+	}
+	return result;
 }

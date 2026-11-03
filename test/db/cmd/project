@@ -347,10 +347,10 @@ oml
 rm .tmp_perms.rzdb
 EOF
 EXPECT=<<EOF
- 1 fd: 3 +0x00000000 0x00000000 * 0x00000002 r-x 
+ 1 fd: 3 +0x00000000 0x00000000 * 0x00000002 r-x
 --
 --
- 1 fd: 3 +0x00000000 0x00000000 * 0x00000002 r-x 
+ 1 fd: 3 +0x00000000 0x00000000 * 0x00000002 r-x
 EOF
 RUN
 
@@ -414,10 +414,25 @@ EXPECT=<<EOF
 --
 0x08048464    1 1            Loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooongname
 [Claaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaasssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss]
-nth       addr  vt_offset type    name                                                                                                                                                                                                                                                                                                                            
+nth       addr  vt_offset type    name
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   1 0x00000100 ---------- DEFAULT Meeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeethod
 
 EOF
 EXPECT_ERR=
+
+RUN
+NAME=macros
+FILE=bins/elf/crackme0x05
+CMDS=<<EOF
+(macro ; pi 1)
+Ps .tmp_macros.rzdb
+o--
+Po .tmp_macros.rzdb
+rm .tmp_macros.rzdb
+(*)
+EOF
+EXPECT=<<EOF
+(macro ; pi 1)
+EOF
 RUN
